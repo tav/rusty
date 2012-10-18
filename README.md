@@ -4,7 +4,7 @@ Rusty is a tool for managing Rust source code.
 
 You can find some of the core developers on IRC:
 
-* [irc://irc.freenode.net/esp]
+* [irc://irc.mozilla.org/rust]
 
 **License**
 
@@ -15,4 +15,4 @@ You are welcome to use it however you wish.
 Enjoy, tav <<tav@espians.com>>
 
 
-[irc://irc.freenode.net/esp]: irc://irc.freenode.net/esp
+[irc://irc.mozilla.org/rust]: irc://irc.mozilla.org/rust
