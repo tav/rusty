@@ -126,6 +126,37 @@ pub trait Value {
     fn string() -> ~str;
 }
 
+type Bool = @mut bool;
+
+impl Bool: Value {
+    fn set(s: &str) -> Option<~str> {
+        if s.len() != 0 {
+            *self = true;
+        }
+        None
+    }
+    fn string() -> ~str {
+        fmt!("%?", *self)
+    }
+}
+
+type Int = @mut int;
+
+impl Int: Value {
+    fn set(s: &str) -> Option<~str> {
+        match int::from_str(s) {
+            Some(x) => {
+                *self = x;
+                None
+            }
+            None => Some(fmt!("strconv: unable to convert %s to an int", s))
+        }
+    }
+    fn string() -> ~str {
+        fmt!("%d", *self)
+    }
+}
+
 type Str = @mut @str;
 
 impl Str: Value {
@@ -169,17 +200,61 @@ pub struct OptionParser {
 
 impl OptionParser {
 
+    fn bool(&self, flags: &[&str], info: &str) -> @mut bool {
+        self._bool(flags, info)
+    }
+
+    fn bool(&self, flag: &str, info: &str) -> @mut bool {
+        self._bool(~[flag], info)
+    }
+
+    priv fn _bool(&self, flags: &[&str], info: &str) -> @mut bool {
+        let mut val = @mut false;
+        self.option(flags, info, true, val as Value);
+        val
+    }
+
     fn dest(&self, name: &str) -> &self/OptionParser {
         self.next_dest = str::from_slice(name);
         return self;
+    }
+
+    fn int(&self, flags: &[&str], info: &str) -> @mut int {
+        self._int(flags, info, 0)
+    }
+
+    fn int(&self, flag: &str, info: &str) -> @mut int {
+        self._int(~[flag], info, 0)
+    }
+
+    fn int(&self, flags: &[&str], info: &str, default: int) -> @mut int {
+        self._int(flags, info, default)
+    }
+
+    fn int(&self, flag: &str, info: &str, default: int) -> @mut int {
+        self._int(~[flag], info, default)
+    }
+
+    priv fn _int(&self, flags: &[&str], info: &str, default: int) -> @mut int {
+        let mut val = @mut default;
+        self.option(flags, info, false, val as Value);
+        val
     }
 
     fn str(&self, flags: &[&str], info: &str) -> @mut @str {
         self._str(flags, info, "")
     }
 
+    fn str(&self, flag: &str, info: &str) -> @mut @str {
+        self._str(~[flag], info, "")
+    }
+
     fn str(&self, flags: &[&str], info: &str, default: &str) -> @mut @str {
         self._str(flags, info, default)
+    }
+
+    fn str(&self, flag: &str, info: &str, default: &str) -> @mut @str {
+        self._str(~[flag], info, default)
     }
 
     priv fn _str(&self, flags: &[&str], info: &str, default: &str) -> @mut @str {
@@ -207,7 +282,7 @@ impl OptionParser {
                 conf = move flag;
                 // copy to --flag
             } else {
-                fail fmt!("invalid flag: %s", flag);
+                fail fmt!("optparse: invalid flag: %s", flag);
             }
         }
         self.opts.push(@OptValue{
@@ -267,9 +342,9 @@ impl OptionParser {
         move retargs
     }
 
-    // fn print_config_file(name: &str) {
-    //     io::println(name)
-    // }
+    fn print_config_file(name: &str) {
+        io::println(name)
+    }
 
     fn required(&self) -> &self/OptionParser {
         self.next_required = true;
