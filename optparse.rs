@@ -118,9 +118,27 @@
 // auto-complete
 // config file
 
-use core::option::{None, Some};
+use core::option::{Option, None, Some};
 
-type ErrPrinter = fn(&str, &str);
+// The Value trait.
+pub trait Value {
+    fn set(&str) -> Option<~str>;
+    fn string() -> ~str;
+}
+
+type Str = @mut @str;
+
+impl Str: Value {
+    fn set(s: &str) -> Option<~str> {
+        *self = s.to_managed();
+        None
+    }
+    fn string() -> ~str {
+        fmt!("\"%s\"", *self)
+    }
+}
+
+pub type ErrPrinter = &fn(&str, &str);
 
 fn default_arg_required(prog: &str, arg: &str) {
     io::println(fmt!("%s: error: %s option requires an argument", prog, arg))
@@ -134,48 +152,144 @@ fn default_required(prog: &str, arg: &str) {
     io::println(fmt!("%s: error: required: %s", prog, arg))
 }
 
-// The Value trait.
-pub trait Value {
-    fn set(&str) -> core::option::Option<~str>;
-    fn string() -> ~str;
-}
-
 pub struct OptionParser {
     mut add_help: bool,
     mut add_version: bool,
     mut err_arg_required: ErrPrinter,
     mut err_no_such_option: ErrPrinter,
     mut err_required: ErrPrinter,
-    mut set_required: bool,
+    mut next_dest: ~str,
+    mut next_multi: bool,
+    mut next_required: bool,
+    mut opts: ~[@OptValue],
+    mut print_defaults: bool,
     mut usage: ~str,
     mut version: ~str,
 }
 
 impl OptionParser {
 
-    fn print_config_file(name: &str) {
-        io::println(name)
+    fn dest(&self, name: &str) -> &self/OptionParser {
+        self.next_dest = str::from_slice(name);
+        return self;
     }
 
-    fn int(flags: ~[~str], value: ~str, usage: ~str) {
-
+    fn str(&self, flags: &[&str], info: &str) -> @mut @str {
+        self._str(flags, info, "")
     }
 
-    // fn required() -> ~OptionParser {
-    fn required() -> ~OptionParser/&self {
-        self.set_required = true;
-        return self
+    fn str(&self, flags: &[&str], info: &str, default: &str) -> @mut @str {
+        self._str(flags, info, default)
+    }
+
+    priv fn _str(&self, flags: &[&str], info: &str, default: &str) -> @mut @str {
+        let mut val = @mut default.to_managed();
+        self.option(flags, info, false, val as Value);
+        val
+    }
+
+    fn multi(&self) -> &self/OptionParser {
+        self.next_multi = true;
+        return self;
+    }
+
+    fn option(&self, flags: &[&str], info: &str, implicit: bool, value: @Value) {
+        let mut conf = ~"";
+        let mut flag_long = ~"";
+        let mut flag_short = ~"";
+        for flags.each |f| {
+            let flag = str::from_slice(*f);
+            if flag.starts_with("--") {
+                flag_long = move flag;
+            } else if flag.starts_with("-") {
+                flag_short = move flag;
+            } else if flag.ends_with(":") {
+                conf = move flag;
+                // copy to --flag
+            } else {
+                fail fmt!("invalid flag: %s", flag);
+            }
+        }
+        self.opts.push(@OptValue{
+            defined: false,
+            dest: copy self.next_dest,
+            flag_long: move flag_long,
+            flag_short: move flag_short,
+            implicit: implicit,
+            info: str::from_slice(info),
+            multi: self.next_multi,
+            required_flag: if self.next_required && conf.len() != 0 {
+                false
+            } else {
+                self.next_required
+            },
+            required_conf: self.next_required,
+            value: value,
+            conf: move conf,
+        });
+        self.next_dest = ~"";
+        self.next_multi = false;
+        self.next_required = false;
+    }
+
+    fn parse(&self) -> ~[~str] {
+        self._parse(os::args())
+    }
+
+    fn parse(&self, args: &[~str]) -> ~[~str] {
+        self._parse(args)
+    }
+
+    priv fn _parse(&self, args: &[~str]) -> ~[~str] {
+        let retargs: ~[~str] = ~[];
+        let arglen = args.len();
+        let optslen = self.opts.len();
+        let mut i = 0;
+        while i < arglen {
+            let arg = copy args[i];
+            let mut j = 0;
+            while j < optslen {
+                let opt = self.opts[j];
+                if opt.flag_long == arg {
+                    if opt.implicit {
+                        opt.value.set(arg);
+                    } else if arglen > i + 1 {
+                        opt.value.set(args[i+1]);
+                    }
+                    break;
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        self.add_help = false;
+        self.add_version = false;
+        move retargs
+    }
+
+    // fn print_config_file(name: &str) {
+    //     io::println(name)
+    // }
+
+    fn required(&self) -> &self/OptionParser {
+        self.next_required = true;
+        return self;
     }
 
 }
 
-struct Option {
-    required: bool,
-    value: Value
-}
-
-fn newopt() {
-
+struct OptValue {
+    conf: ~str,
+    mut defined: bool,
+    dest: ~str,
+    flag_long: ~str,
+    flag_short: ~str,
+    implicit: bool,
+    info: ~str,
+    multi: bool,
+    required_conf: bool,
+    required_flag: bool,
+    value: @Value
 }
 
 pub fn new(usage: ~str, version: ~str) -> ~OptionParser {
@@ -189,8 +303,12 @@ pub fn new(usage: ~str, version: ~str) -> ~OptionParser {
         err_arg_required: default_arg_required,
         err_no_such_option: default_no_such_option,
         err_required: default_required,
-        set_required: false,
+        next_dest: ~"",
+        next_multi: false,
+        next_required: false,
+        opts: ~[],
+        print_defaults: false,
         usage: copy usage,
-        version: copy version
+        version: copy version,
     }
 }
