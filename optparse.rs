@@ -140,6 +140,23 @@ impl Bool: Value {
     }
 }
 
+type I64 = @mut i64;
+
+impl I64: Value {
+    fn set(s: &str) -> Option<~str> {
+        match i64::from_str(s) {
+            Some(x) => {
+                *self = x;
+                None
+            }
+            None => Some(fmt!("strconv: unable to convert %s to an i64", s))
+        }
+    }
+    fn string() -> ~str {
+        fmt!("%?", *self)
+    }
+}
+
 type Int = @mut int;
 
 impl Int: Value {
@@ -166,6 +183,40 @@ impl Str: Value {
     }
     fn string() -> ~str {
         fmt!("\"%s\"", *self)
+    }
+}
+
+type U64 = @mut u64;
+
+impl U64: Value {
+    fn set(s: &str) -> Option<~str> {
+        match u64::from_str(s) {
+            Some(x) => {
+                *self = x;
+                None
+            }
+            None => Some(fmt!("strconv: unable to convert %s to a u64", s))
+        }
+    }
+    fn string() -> ~str {
+        fmt!("%?", *self)
+    }
+}
+
+type Uint = @mut uint;
+
+impl Uint: Value {
+    fn set(s: &str) -> Option<~str> {
+        match uint::from_str(s) {
+            Some(x) => {
+                *self = x;
+                None
+            }
+            None => Some(fmt!("strconv: unable to convert %s to a uint", s))
+        }
+    }
+    fn string() -> ~str {
+        fmt!("%?", *self)
     }
 }
 
@@ -217,6 +268,28 @@ impl OptionParser {
     fn dest(&self, name: &str) -> &self/OptionParser {
         self.next_dest = str::from_slice(name);
         return self;
+    }
+
+    fn i64(&self, flags: &[&str], info: &str) -> @mut i64 {
+        self._i64(flags, info, 0)
+    }
+
+    fn i64(&self, flag: &str, info: &str) -> @mut i64 {
+        self._i64(~[flag], info, 0)
+    }
+
+    fn i64(&self, flags: &[&str], info: &str, default: i64) -> @mut i64 {
+        self._i64(flags, info, default)
+    }
+
+    fn i64(&self, flag: &str, info: &str, default: i64) -> @mut i64 {
+        self._i64(~[flag], info, default)
+    }
+
+    priv fn _i64(&self, flags: &[&str], info: &str, default: i64) -> @mut i64 {
+        let mut val = @mut default;
+        self.option(flags, info, false, val as Value);
+        val
     }
 
     fn int(&self, flags: &[&str], info: &str) -> @mut int {
@@ -349,6 +422,50 @@ impl OptionParser {
     fn required(&self) -> &self/OptionParser {
         self.next_required = true;
         return self;
+    }
+
+    fn u64(&self, flags: &[&str], info: &str) -> @mut u64 {
+        self._u64(flags, info, 0)
+    }
+
+    fn u64(&self, flag: &str, info: &str) -> @mut u64 {
+        self._u64(~[flag], info, 0)
+    }
+
+    fn u64(&self, flags: &[&str], info: &str, default: u64) -> @mut u64 {
+        self._u64(flags, info, default)
+    }
+
+    fn u64(&self, flag: &str, info: &str, default: u64) -> @mut u64 {
+        self._u64(~[flag], info, default)
+    }
+
+    priv fn _u64(&self, flags: &[&str], info: &str, default: u64) -> @mut u64 {
+        let mut val = @mut default;
+        self.option(flags, info, false, val as Value);
+        val
+    }
+
+    fn uint(&self, flags: &[&str], info: &str) -> @mut uint {
+        self._uint(flags, info, 0)
+    }
+
+    fn uint(&self, flag: &str, info: &str) -> @mut uint {
+        self._uint(~[flag], info, 0)
+    }
+
+    fn uint(&self, flags: &[&str], info: &str, default: uint) -> @mut uint {
+        self._uint(flags, info, default)
+    }
+
+    fn uint(&self, flag: &str, info: &str, default: uint) -> @mut uint {
+        self._uint(~[flag], info, default)
+    }
+
+    priv fn _uint(&self, flags: &[&str], info: &str, default: uint) -> @mut uint {
+        let mut val = @mut default;
+        self.option(flags, info, false, val as Value);
+        val
     }
 
 }
