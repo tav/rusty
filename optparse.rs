@@ -67,15 +67,15 @@
 // command line tools. Sometimes though, especially when serving non-English
 // locales, you might want to disable this behaviour:
 //
-//     opts.add_help = false;
-//     opts.add_version = false;
+//     opts.handle_help = false;
+//     opts.handle_version = false;
 //
 // If you want, you can still add custom options and handle it yourself with the
 // utility `print_help()` and `print_version()` methods, e.g.
 //
 //     let help = opts.bool(["-h", "--hilfe"], "diese hilfe anzeigen und beenden");
 //
-//     opts.add_help = false;
+//     opts.handle_help = false;
 //     opts.parse();
 //
 //     if *help {
@@ -119,6 +119,20 @@
 // config file
 
 use core::option::{Option, None, Some};
+
+pub trait Completer {
+    fn complete() -> ~[~str];
+}
+
+impl ~[~str]: Completer {
+    fn complete() -> ~[~str] {
+        copy self
+    }
+}
+
+pub fn list_complete(items: &[&str]) -> Option<@Completer> {
+    Some(items.map(|i| i.to_str()) as @Completer)
+}
 
 // The Value trait.
 pub trait Value {
@@ -234,14 +248,29 @@ fn default_required(prog: &str, arg: &str) {
     io::println(fmt!("%s: error: required: %s", prog, arg))
 }
 
+fn exit(print: &const ErrPrinter, prog: &str, arg: &str) {
+    (*print)(prog, arg);
+    libc::exit(1);
+}
+
+fn get_prog_name(arg: &str) -> ~str {
+    match path::Path(arg).filename() {
+        Some(x) => copy x,
+        None => str::from_slice(arg)
+    }
+}
+
 pub struct OptionParser {
-    mut add_help: bool,
-    mut add_version: bool,
+    priv mut _help_added: bool,
+    priv mut _version_added: bool,
+    mut handle_help: bool,
+    mut handle_version: bool,
+    mut completer: Option<@Completer>,
     mut err_arg_required: ErrPrinter,
     mut err_no_such_option: ErrPrinter,
     mut err_required: ErrPrinter,
+    mut next_completer: Option<@Completer>,
     mut next_dest: ~str,
-    mut next_multi: bool,
     mut next_required: bool,
     mut opts: ~[@OptValue],
     mut print_defaults: bool,
@@ -261,7 +290,7 @@ impl OptionParser {
 
     priv fn _bool(&self, flags: &[&str], info: &str) -> @mut bool {
         let mut val = @mut false;
-        self.option(flags, info, true, val as Value);
+        self._option(flags, info, true, val as Value);
         val
     }
 
@@ -288,7 +317,7 @@ impl OptionParser {
 
     priv fn _i64(&self, flags: &[&str], info: &str, default: i64) -> @mut i64 {
         let mut val = @mut default;
-        self.option(flags, info, false, val as Value);
+        self._option(flags, info, false, val as Value);
         val
     }
 
@@ -310,7 +339,7 @@ impl OptionParser {
 
     priv fn _int(&self, flags: &[&str], info: &str, default: int) -> @mut int {
         let mut val = @mut default;
-        self.option(flags, info, false, val as Value);
+        self._option(flags, info, false, val as Value);
         val
     }
 
@@ -332,17 +361,20 @@ impl OptionParser {
 
     priv fn _str(&self, flags: &[&str], info: &str, default: &str) -> @mut @str {
         let mut val = @mut default.to_managed();
-        self.option(flags, info, false, val as Value);
+        self._option(flags, info, false, val as Value);
         val
     }
 
-    fn multi(&self) -> &self/OptionParser {
-        self.next_multi = true;
-        return self;
+    fn option(&self, flags: &[&str], info: &str, value: @Value) {
+        self._option(flags, info, false, value)
     }
 
-    fn option(&self, flags: &[&str], info: &str, implicit: bool, value: @Value) {
-        let mut conf = ~"";
+    fn option(&self, flag: &str, info: &str, value: @Value) {
+        self._option(~[flag], info, false, value)
+    }
+
+    priv fn _option(&self, flags: &[&str], info: &str, implicit: bool, value: @Value) {
+        let mut flag_config = ~"";
         let mut flag_long = ~"";
         let mut flag_short = ~"";
         for flags.each |f| {
@@ -351,32 +383,31 @@ impl OptionParser {
                 flag_long = move flag;
             } else if flag.starts_with("-") {
                 flag_short = move flag;
-            } else if flag.ends_with(":") {
-                conf = move flag;
-                // copy to --flag
             } else {
-                fail fmt!("optparse: invalid flag: %s", flag);
+                flag_long = ~"--" + flag;
+                flag_config = move flag;
+                // fail fmt!("optparse: invalid flag: %s", flag);
             }
         }
         self.opts.push(@OptValue{
+            completer: self.next_completer,
             defined: false,
             dest: copy self.next_dest,
             flag_long: move flag_long,
             flag_short: move flag_short,
             implicit: implicit,
             info: str::from_slice(info),
-            multi: self.next_multi,
-            required_flag: if self.next_required && conf.len() != 0 {
+            required_flag: if self.next_required && flag_config.len() != 0 {
                 false
             } else {
                 self.next_required
             },
             required_conf: self.next_required,
             value: value,
-            conf: move conf,
+            flag_config: move flag_config,
         });
+        self.next_completer = None;
         self.next_dest = ~"";
-        self.next_multi = false;
         self.next_required = false;
     }
 
@@ -389,8 +420,19 @@ impl OptionParser {
     }
 
     priv fn _parse(&self, args: &[~str]) -> ~[~str] {
+        if self.handle_help && !self._help_added {
+            self.bool(["-h", "--help"], "show this help and exit");
+            self._help_added = true;
+        }
+        if self.handle_version && !self._version_added {
+            self.bool(["-v", "--version"], "show the version and exit");
+            self._version_added = true;
+        }
         let retargs: ~[~str] = ~[];
         let arglen = args.len();
+        if arglen < 1 {
+            return move retargs;
+        }
         let optslen = self.opts.len();
         let mut i = 0;
         while i < arglen {
@@ -410,8 +452,7 @@ impl OptionParser {
             }
             i += 1;
         }
-        self.add_help = false;
-        self.add_version = false;
+        exit(&mut self.err_no_such_option, get_prog_name(args[0]), "name");
         move retargs
     }
 
@@ -442,7 +483,7 @@ impl OptionParser {
 
     priv fn _u64(&self, flags: &[&str], info: &str, default: u64) -> @mut u64 {
         let mut val = @mut default;
-        self.option(flags, info, false, val as Value);
+        self._option(flags, info, false, val as Value);
         val
     }
 
@@ -464,21 +505,26 @@ impl OptionParser {
 
     priv fn _uint(&self, flags: &[&str], info: &str, default: uint) -> @mut uint {
         let mut val = @mut default;
-        self.option(flags, info, false, val as Value);
+        self._option(flags, info, false, val as Value);
         val
+    }
+
+    fn with_completer(&self, completer: Option<@Completer>) -> &self/OptionParser {
+        self.next_completer = completer;
+        return self;
     }
 
 }
 
 struct OptValue {
-    conf: ~str,
+    completer: Option<@Completer>,
     mut defined: bool,
     dest: ~str,
+    flag_config: ~str,
     flag_long: ~str,
     flag_short: ~str,
     implicit: bool,
     info: ~str,
-    multi: bool,
     required_conf: bool,
     required_flag: bool,
     value: @Value
@@ -486,19 +532,22 @@ struct OptValue {
 
 pub fn new(usage: ~str, version: ~str) -> ~OptionParser {
     ~OptionParser{
-        add_help: true,
-        add_version: if version == ~"" {
+        _help_added: false,
+        _version_added: false,
+        completer: None,
+        err_arg_required: default_arg_required,
+        err_no_such_option: default_no_such_option,
+        err_required: default_required,
+        next_completer: None,
+        next_dest: ~"",
+        next_required: false,
+        opts: ~[],
+        handle_help: true,
+        handle_version: if version == ~"" {
             false
         } else {
             true
         },
-        err_arg_required: default_arg_required,
-        err_no_such_option: default_no_such_option,
-        err_required: default_required,
-        next_dest: ~"",
-        next_multi: false,
-        next_required: false,
-        opts: ~[],
         print_defaults: false,
         usage: copy usage,
         version: copy version,
